@@ -32,10 +32,10 @@ def main():
     args = get_args()
     
     # Define the scopes needed for accessing playlists and their tracks
-    scope = "playlist-read-private user-library-read"
+    Scope = "playlist-read-private user-library-read"
     
     # Create a SpotifyOAuth instance
-    sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=scope))
+    sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=Scope))
     
     # Retrieve the user's Spotify ID
     user_id = sp.me()['id']
