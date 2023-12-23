@@ -1,77 +1,113 @@
-import argparse
-import logging
-
+import os
+from redis import UsernamePasswordCredentialProvider
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth
+from spotipy.oauth2 import SpotifyClientCredentials
+import google_auth_oauthlib.flow
+import googleapiclient.discovery
+import googleapiclient.errors
 
-logger = logging.getLogger('examples.select_playlist')
-logging.basicConfig(level='DEBUG')
 
-def get_args():
-    parser = argparse.ArgumentParser(description='Select a specific playlist to view songs')
-    return parser.parse_args()
+# Retrieve API credentials from environment variables
+client_id = os.environ.get("SPOTIPY_CLIENT_ID")
+client_secret = os.environ.get("SPOTIPY_CLIENT_SECRET")
+redirect_uri = os.environ.get("SPOTIPY_REDIRECT_URI")
 
-def select_playlist(playlists):
-    print("Your Playlists:")
-    for index, playlist in enumerate(playlists):
-        print(f"{index + 1}: {playlist['name']}")
-    
-    while True:
+# Authenticate with Spotify
+client_credentials_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+
+# Set up YouTube API environment variables
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"C:\Users\navad\Downloads\client_secrets.json"   # Replace with your credentials path
+
+# Authenticate with YouTube
+scopes = ["https://www.googleapis.com/auth/youtube"]
+client_secrets_file = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+flow = google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file(
+   client_secrets_file, scopes=scopes
+)
+credentials = flow.run_local_server(port=0)
+youtube = googleapiclient.discovery.build("youtube", "v3", credentials=credentials)
+
+# Get user's authorization
+scope = "playlist-read-private"
+token = spotipy.util.prompt_for_user_token(client_id=client_id,
+                                          client_secret=client_secret,
+                                          redirect_uri=redirect_uri,
+                                          scope=scope)
+if token:
+   sp = spotipy.Spotify(auth=token)
+else:
+   print("Can't get token for", UsernamePasswordCredentialProvider)
+
+# Get user's playlists
+playlists = sp.current_user_playlists()
+
+# Display available playlists
+print("Your Playlists:")
+for i, playlist in enumerate(playlists['items']):
+   print(f"{i + 1}. {playlist['name']}")
+
+# Ask user to select a playlist
+selected_playlist_index = int(input("Select a playlist by number: ")) - 1
+selected_playlist_id = playlists['items'][selected_playlist_index]['id']
+
+# Retrieve tracks from the selected playlist
+playlist_tracks = sp.playlist_tracks(selected_playlist_id)
+
+# Display song names with artist names
+print("Songs in the playlist:")
+for track in playlist_tracks['items']:
+   song_name = track['track']['name']
+   artist_name = track['track']['artists'][0]['name']
+   print(f"- {song_name} - {artist_name}")
+
+   # Create a new YouTube playlist
+request = youtube.playlists().insert(
+    part="snippet,status",
+    body={
+        "snippet": {
+            "title": playlists['items'][selected_playlist_index]['name'],
+            "description": "Playlist transferred from Spotify Created By Navadeep Naidu"
+        },
+        "status": {
+            "privacyStatus": "PUBLIC"  # Adjust privacy if needed
+        }
+    }
+)
+playlist_response = request.execute()
+youtube_playlist_id = playlist_response["id"]
+
+# Search for songs on YouTube and add to playlist
+for track in playlist_tracks['items']:
+    song_name = track['track']['name']
+    artist_name = track['track']['artists'][0]['name']
+
+    search_request = youtube.search().list(
+        part="snippet",
+        q=f"{song_name} {artist_name}",
+        maxResults=1,  # Retrieve only the top result
+        type="VIDEO"
+    )
+    search_response = search_request.execute()
+
+    if search_response["items"]:
+        video_id = search_response["items"][0]["id"]["videoId"]
+        add_video_request = youtube.playlistItems().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "playlistId": youtube_playlist_id,
+                    "resourceId": {
+                        "kind": "youtube#video",
+                        "videoId": video_id
+                    }
+                }
+            }
+        )
         try:
-            choice = int(input("Enter the number of the playlist you want to view or enter 0 to exit: "))
-            if choice == 0:
-                return None
-            elif 1 <= choice <= len(playlists):
-                return playlists[choice - 1]
-            else:
-                print("Invalid choice. Please enter a valid number or 0 to exit.")
-        except ValueError:
-            print("Invalid input. Please enter a valid number or 0 to exit.")
-
-def main():
-    args = get_args()
-    
-    # Define the scopes needed for accessing playlists and their tracks
-    Scope = "playlist-read-private user-library-read"
-    
-    # Create a SpotifyOAuth instance
-    sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=Scope))
-    
-    # Retrieve the user's Spotify ID
-    user_id = sp.me()['id']
-    
-    # Get the user's playlists
-    playlists = sp.current_user_playlists()
-    
-    # Allow the user to select a specific playlist
-    selected_playlist = select_playlist(playlists['items'])
-    
-    if selected_playlist is None:
-        print("Exiting.")
-        return
-    
-    # Print the selected playlist name
-    playlist_name = selected_playlist['name']
-    print(f"Selected Playlist: {playlist_name}")
-    
-    # Get the tracks in the selected playlist
-    results = sp.playlist_tracks(selected_playlist['id'])
-    
-    # Create a list of track names and artist names
-    track_list = [f"{track['track']['name']} - {', '.join(artist['name'] for artist in track['track']['artists'])}" for track in results['items']]
-    
-    while True:
-        choice = input("Do you want to view the track list? (yes/no): ")
-        if choice.lower() == 'yes':
-            print("Track List:")
-            for index, track_info in enumerate(track_list):
-                print(f"{index + 1}: {track_info}")
-            break
-        elif choice.lower() == 'no':
-            print("Exiting.")
-            break
-        else:
-            print("Invalid input. Please enter 'yes' or 'no'.")
-
-if __name__ == '__main__':
-    main()
+            add_video_request.execute()
+            print(f"Added '{song_name} - {artist_name}' to YouTube playlist")
+        except googleapiclient.errors.HttpError as error:
+            print(f"Error adding video: {error}")
+    else:
+        print(f"Song '{song_name} - {artist_name}' not found on YouTube")
