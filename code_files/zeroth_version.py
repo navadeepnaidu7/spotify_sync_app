@@ -16,7 +16,7 @@ client_credentials_manager = SpotifyClientCredentials(client_id=client_id, clien
 sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
 # YouTube API environment variables
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"C:\Users\navad\Downloads\client_secrets.json"   # Replace with your credentials path
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"C:\Users\navad\Coding\spotify_sync_app\text_files\client_secrets.json"   # Replace with your credentials path
 
 # Authentication with YouTube
 scopes = ["https://www.googleapis.com/auth/youtube"]
